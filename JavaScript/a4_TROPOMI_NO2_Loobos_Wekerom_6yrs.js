@@ -1,5 +1,5 @@
 /************************************
-# A2: Data acquisition for Sentinel-5P tropospheric and 
+# A4: Data acquisition for Sentinel-5P tropospheric and 
 # total NO2 column density at Loobos and Wekerom (3 km buffers)
 #
 # This script extracts:

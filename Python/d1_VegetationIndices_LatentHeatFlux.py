@@ -1,5 +1,5 @@
-# D1: Data analysis of vegetation indices and latent heat flux, in this script, we will analyze the relationship between five vegetation indices (NDVI, 
-# kNDVI, CRswir, CIre and REP) and latent heat flux at the Loobos flux tower site for the period of 2020-2025, and save the plots.
+# D1: Data analysis of vegetation indices and latent heat flux. n this script, we will analyze the relationship between five vegetation indices (NDVI, 
+# NDRE, CIred-edge, MTCI, MSAVI, NIRv, EVI (need to add CRswir) and latent heat flux at the Loobos flux tower site for the period of 2020-2025, and save the plots.
 
 # Author: Zhiyu Wu, Date: 06/03/2026
 
@@ -7,27 +7,68 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import math
 import os
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 
 output_folder = 'Output/RQ1'
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # ------ Step 2: Load the vegetation indices and latent heat flux datasets ------
-# Vegetation indices csv, which contains columns of 'Date', 'NDVI', 'kNDVI', 'CRswir', 'CIre' and 'REP'
-VI_data = pd.read_csv('Data/Sentinel2/VegetationIndices_TimeSeries.csv', parse_dates=['Date'])
+# Vegetation indices csv, which contains columns of 'Date', 'NDVI', 'NDRE', 'CIred-edge', 'MTCI', 'MSAVI', 'NIRv', 'EVI'
+VIs_data = pd.read_csv('Data/Sentinel2/VegetationIndices_TimeSeries_New.csv', parse_dates=['Date'])
+# Read another vegetation indices csv, select only the column of "CRswir" and "Date"
+CRswir_data = pd.read_csv('Data/Sentinel2/VegetationIndices_TimeSeries.csv', parse_dates=['Date'], usecols=['Date', 'CRSWIR'])
+# Merge the CRswir data with the VIs_data on the 'Date' column to create a combined DataFrame
+VIs_data = pd.merge(VIs_data, CRswir_data, on='Date', how='left')
+# Print out the first few rows of the vegetation indices data to check
+print(VIs_data.head())
+
 # Latent heat flux csv, which contains columns of 'Timestamp' and 'LE'
 LE_data = pd.read_csv('Data/VeluweInSitu/Loobos_LatentHeatFlux_2020_2025.csv', parse_dates=['Timestamp'])
 
 # ------ Step 3: Data processing ------
 # For vegetation indices, create centered 5-point rolling mean to smooth the data, min_periods=1 means that if there are less than 5 data points 
 # at the beginning and end of the time series, it will still calculate the mean with the available data points
-VI_data['NDVI_smooth'] = VI_data['NDVI'].rolling(window=5, center=True, min_periods=1).mean()
-VI_data['kNDVI_smooth'] = VI_data['kNDVI'].rolling(window=5, center=True, min_periods=1).mean()
-VI_data['CRSWIR_smooth'] = VI_data['CRSWIR'].rolling(window=5, center=True, min_periods=1).mean()
-VI_data['CIre_smooth'] = VI_data['CIre'].rolling(window=5, center=True, min_periods=1).mean()
-VI_data['REP_smooth'] = VI_data['REP'].rolling(window=5, center=True, min_periods=1).mean()
-# For latent heat flux, calcualte monthly average
+# Create a function to calculate centered 5-point rolling mean to smooth the data, 
+def smooth_vegetation_indices(df, index_col, date_col='Date', window=5):
+    """
+    Smooth the vegetation index using a centered rolling mean.
+    Parameters:
+    - df: DataFrame containing the vegetation index and date columns.
+    - index_col: Name of the column containing the vegetation index to be smoothed.
+    - date_col: Name of the column containing the date information (default is 'Date').
+    - window: Size of the rolling window (default is 5).
+    Returns:
+    - DataFrame with an additional column for the smoothed vegetation index.
+    The function first ensures that the date column is in datetime format, then drops any rows with missing values in the vegetation index column. 
+    It calculates the centered rolling mean for the specified vegetation index and adds it as a new column to the DataFrame. The smoothed column 
+    is named by appending '_smooth' to the original index column name.
+
+    """
+    # Ensure date column is datetime
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col])
+
+    # Drop missing values
+    df = df.dropna(subset=[index_col])
+
+    # Smooth the index
+    smooth_col = f"{index_col}_smooth"
+    df[smooth_col] = df[index_col].rolling(
+        window=window, center=True, min_periods=1
+    ).mean()
+    return df
+# Apply the smoothing function to each vegetation index
+for index in ['NDVI', 'NDRE', 'CIredge', 'MTCI', 'MSAVI', 'NIRv', 'EVI', 'CRSWIR']:
+    VIs_data = smooth_vegetation_indices(VIs_data, index)   
+# print out the first few rows of the smoothed vegetation indices data to check
+print(VIs_data.head())
+
+# For latent heat flux, select day time period, then calcualte monthly average
+LE_data = LE_data[(LE_data['Timestamp'].dt.hour >= 9) & (LE_data['Timestamp'].dt.hour <= 17)]
 LE_data['Month'] = LE_data['Timestamp'].dt.to_period('M')
 LE_monthly = LE_data.groupby('Month')['LE'].mean().reset_index()
 LE_monthly['Month'] = LE_monthly['Month'].dt.to_timestamp() # Convert back to timestamp for plotting
@@ -88,53 +129,121 @@ def create_timeseries_plot(vi_data, vi_column, vi_label, le_data, le_column, le_
     plt.savefig(filename)
 
 # Create timeseries plots for each vegetation index and latent heat flux
-create_timeseries_plot(VI_data, 'NDVI', 'NDVI', LE_monthly, 'LE', 'Latent Heat Flux', 'Output/RQ1/NDVI_LE_Timeseries.png')
-create_timeseries_plot(VI_data, 'kNDVI', 'kNDVI', LE_monthly, 'LE', 'Latent Heat Flux', 'Output/RQ1/kNDVI_LE_Timeseries.png')
-create_timeseries_plot(VI_data, 'CRSWIR', 'CRSWIR', LE_monthly, 'LE', 'Latent Heat Flux', 'Output/RQ1/CRSWIR_LE_Timeseries.png')
-create_timeseries_plot(VI_data, 'CIre', 'CIre', LE_monthly, 'LE', 'Latent Heat Flux', 'Output/RQ1/CIre_LE_Timeseries.png')
-create_timeseries_plot(VI_data, 'REP', 'REP', LE_monthly, 'LE', 'Latent Heat Flux', 'Output/RQ1/REP_LE_Timeseries.png')
+for vi in ['NDVI', 'NDRE', 'CIredge', 'MTCI', 'MSAVI', 'NIRv', 'EVI', 'CRSWIR']:
+    create_timeseries_plot(
+        VIs_data, vi, vi,
+        LE_monthly, 'LE', 'Latent Heat Flux',
+        os.path.join(output_folder, f'{vi}_LE_Timeseries.png')
+    )
 
-# create a linear regression (y = mx + c) plot between CRSWIR and latent heat flux, calculate out the R-squared value, equation and show it in the plot, save the plot as a png file
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score
+def vi_le_regression(VIs_data, LE_monthly, vi_col, output_folder=None, ax=None):
+    """
+    Calculate monthly average of a smoothed vegetation index, merge with monthly
+    latent heat flux, perform linear regression, and plot the results.
 
-# Calculate monthly average of smoothed CRSWIR
-VI_data['Month'] = VI_data['Date'].dt.to_period('M')
-CRSWIR_monthly = VI_data.groupby('Month')['CRSWIR_smooth'].mean().reset_index()
-CRSWIR_monthly['Month'] = CRSWIR_monthly['Month'].dt.to_timestamp()
+    Parameters
+    ----------
+    VIs_data : pandas DataFrame
+        DataFrame containing vegetation index data with a 'Date' column and
+        smoothed VI columns (e.g. 'CRSWIR_smooth', 'NDVI_smooth').
+    LE_monthly : pandas DataFrame
+        DataFrame containing monthly latent heat flux with columns 'Month' and 'LE'.
+    vi_col : str
+        Name of the raw VI column (e.g. 'CRSWIR', 'NDVI').
+        The smoothed column is automatically inferred as vi_col + '_smooth'.
+    output_folder : str, optional
+        Folder to save the output figure when plotted standalone. If None, shown interactively.
+    ax : matplotlib Axes, optional
+        If provided, plot into this axes (for combined figure). If None, creates its own figure.
 
-# Ensure LE_monthly also has a proper timestamp column for merging
-LE_monthly['Month'] = LE_monthly['Month'].dt.to_timestamp() if hasattr(LE_monthly['Month'].dtype, 'freq') else LE_monthly['Month']
+    Returns
+    -------
+    merged : pandas DataFrame
+        Merged DataFrame with monthly VI and LE values used for regression.
+    slope : float
+    intercept : float
+    r2 : float
+    """
+    vi_smooth_col = f"{vi_col}_smooth"
+    if vi_smooth_col not in VIs_data.columns:
+        raise ValueError(f"Smoothed column '{vi_smooth_col}' not found. "
+                         f"Available: {VIs_data.columns.tolist()}")
 
-# merge on Month so both arrays have the same length ──
-merged = pd.merge(CRSWIR_monthly, LE_monthly[['Month', 'LE']], on='Month', how='inner')
+    # Calculate monthly average of smoothed VI
+    VIs_data['Month'] = VIs_data['Date'].dt.to_period('M')
+    vi_monthly        = VIs_data.groupby('Month')[vi_smooth_col].mean().reset_index()
+    vi_monthly['Month'] = vi_monthly['Month'].dt.to_timestamp()
 
-# Interpolate any remaining NaNs in CRSWIR after the merge
-merged['CRSWIR_smooth'] = merged['CRSWIR_smooth'].interpolate(method='linear')
+    # Ensure LE_monthly has a proper timestamp column
+    le = LE_monthly.copy()
+    le['Month'] = le['Month'].dt.to_timestamp() if hasattr(le['Month'].dtype, 'freq') else le['Month']
 
-# Drop rows where LE is still NaN (if any)
-merged = merged.dropna(subset=['CRSWIR_smooth', 'LE'])
+    # Merge on Month
+    merged = pd.merge(vi_monthly, le[['Month', 'LE']], on='Month', how='inner')
+    merged[vi_smooth_col] = merged[vi_smooth_col].interpolate(method='linear')
+    merged = merged.dropna(subset=[vi_smooth_col, 'LE'])
 
-X = merged['CRSWIR_smooth'].values.reshape(-1, 1)
-y = merged['LE'].values
+    # Linear regression
+    X     = merged[vi_smooth_col].values.reshape(-1, 1)
+    y     = merged['LE'].values
+    model = LinearRegression()
+    model.fit(X, y)
+    y_pred    = model.predict(X)
+    r2        = r2_score(y, y_pred)
+    slope     = model.coef_[0]
+    intercept = model.intercept_
+    print(f"LE = {slope:.2f} * {vi_col} + {intercept:.2f}, R² = {r2:.2f}")
 
-# Fit the linear regression model
-model = LinearRegression()
-model.fit(X, y)
+    # Plot into provided ax or create a standalone figure
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=(8, 6))
 
-# Predict and calculate R-squared
-y_pred = model.predict(X)
-r2 = r2_score(y, y_pred)
+    ax.scatter(merged[vi_smooth_col], merged['LE'],
+               color='blue', alpha=0.6, label='Data Points', zorder=3)
+    ax.plot(merged[vi_smooth_col], y_pred, color='red',
+            label=f'LE = {slope:.2f} * {vi_col} + {intercept:.2f}\nR² = {r2:.2f}')
+    ax.set_xlabel(f'Smoothed {vi_col}', fontsize=14)
+    ax.set_ylabel('Latent Heat Flux (W/m$^2$)', fontsize=14)
+    ax.set_title(f'LE vs {vi_col}', fontsize=15)
+    ax.legend(fontsize=12)
+    ax.tick_params(axis='both', labelsize=13)
 
-# Plot
-plt.figure(figsize=(8, 6))
-plt.scatter(merged['CRSWIR_smooth'], merged['LE'], color='blue', alpha=0.6, label='Data Points')
-plt.plot(merged['CRSWIR_smooth'], y_pred, color='red',
-         label=f'Linear Fit: y = {model.coef_[0]:.2f}x + {model.intercept_:.2f}\nR² = {r2:.2f}')
-plt.xlabel('Smoothed CRSWIR', fontsize=12)
-plt.ylabel('Latent Heat Flux (W/m$^2$)', fontsize=12)
-plt.title('Linear Regression between Smoothed CRSWIR and Latent Heat Flux', fontsize=14)
-plt.legend(fontsize=10)
+    if standalone:
+        plt.tight_layout()
+        if output_folder:
+            plt.savefig(os.path.join(output_folder, f'{vi_col}_LE_LinearRegression.png'))
+        else:
+            plt.show()
+
+    return merged, slope, intercept, r2
+
+vi_list = ['CRSWIR', 'NDVI', 'NIRv', 'MSAVI', 'EVI', 'NDRE', 'CIredge', 'MTCI']
+
+n_cols = 2
+n_rows = math.ceil(len(vi_list) / n_cols)
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(22, 20))
+axes = axes.flatten()
+
+le_regression_results = []
+
+for i, vi in enumerate(vi_list):
+    merged, slope, intercept, r2 = vi_le_regression(
+        VIs_data, LE_monthly, vi_col=vi, ax=axes[i]
+    )
+    le_regression_results.append({'VI': vi, 'slope': slope, 'intercept': intercept, 'R2': r2})
+
+# Hide unused subplots
+for j in range(len(vi_list), len(axes)):
+    axes[j].set_visible(False)
+
+plt.suptitle('Latent Heat Flux vs Vegetation Indices (Monthly)', fontsize=18, fontweight='bold', y=1.02)
 plt.tight_layout()
-plt.savefig('Output/RQ1/CRSWIR_LE_LinearRegression.png')
+plt.savefig(os.path.join(output_folder, 'LE_vs_all_VI_regression.png'), bbox_inches='tight')
+plt.show()
 
+# Summary table
+le_regression_results_df = pd.DataFrame(le_regression_results)
+print(le_regression_results_df)
+# Save the summary table as a csv file
+le_regression_results_df.to_csv(os.path.join(output_folder, 'LE_VI_Regression_Results.csv'), index=False)

@@ -1,1 +1,1 @@
-from windrose import pollution_rose
+from .windrose import pollution_rose

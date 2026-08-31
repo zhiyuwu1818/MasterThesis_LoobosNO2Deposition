@@ -33,7 +33,7 @@ def infer_surface_NO2(NO2_VCD, SCM_prof_NO2, TROPOMI_NO2VCD):
     SCM_prof_NO2['Date'] = pd.to_datetime(SCM_prof_NO2['datetime']).dt.date
     height_cols          = [c for c in SCM_prof_NO2.columns if c.startswith('height_')]
     daily_mean_profile   = SCM_prof_NO2.groupby('Date')[height_cols].mean()
-    surface_col          = daily_mean_profile.columns[0]
+    surface_col          = daily_mean_profile.columns[2]
     print(f"Using '{surface_col}' as the surface layer for NO2_SL_model.")
 
     # Restrict to the date range covered by SCM VCD data

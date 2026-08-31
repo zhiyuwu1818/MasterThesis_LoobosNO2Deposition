@@ -1,15 +1,16 @@
 /************************************
-# C1 – Footprint-Based Sentinel-2 Multi-Index Time Series Extraction
+# Footprint-Based Sentinel-2 Multi-Index Time Series Extraction
 # Period: 2020–2025
 # Cloud filter (AOI-based): cloud_fraction ≤ 0.5
-# Indices: NDVI, CR_SWIR, CIre, REP, kNDVI
+#
+# Indices:
+# 10 m → NDVI, NIRv, WDVI, MSAVI, EVI
+# 20 m → NDRE, CIredge, MTCI
 #
 # Input: Flux footprint polygon (aoi)
-# Dual Resolution Output:
-# - 10 m stack (NDVI, kNDVI)
-# - 20 m stack (CRSWIR, CIre, REP)
+#
 # Author: Zhiyu Wu
-# Date: 03/03/2026
+# Date: 26/03/2026
 ************************************/
 
 // ==========================================================
@@ -21,19 +22,22 @@ Map.addLayer(aoi, {color: 'green'}, 'AOI');
 var startDate = '2020-01-01';
 var endDate   = '2025-12-31';
 
+
 // ==========================================================
-// 2. Load Sentinel-2 SR Harmonized
+// 2. Load Sentinel-2
 // ==========================================================
 var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
   .filterBounds(aoi)
   .filterDate(startDate, endDate);
 
+
 // ==========================================================
-// 3. AOI-Based Cloud Fraction (SCL)
+// 3. Cloud filtering
 // ==========================================================
 function addCloudFraction(image) {
 
   var scl = image.select('SCL');
+
   var cloudMask = scl.eq(3)
                     .or(scl.eq(8))
                     .or(scl.eq(9))
@@ -52,10 +56,9 @@ function addCloudFraction(image) {
 s2 = s2.map(addCloudFraction)
        .filter(ee.Filter.lt('cloud_frac_aoi', 0.5));
 
-print('Usable S2 images:', s2.size());
 
 // ==========================================================
-// 4. Cloud Masking + Normalization
+// 4. Preprocessing
 // ==========================================================
 function preprocess(image) {
 
@@ -68,9 +71,10 @@ function preprocess(image) {
                 .and(scl.neq(11));
 
   var bands = [
-    'B4','B8',        // NDVI
-    'B8A','B11','B12',// CR-SWIR
-    'B5','B6','B7'    // Red-edge
+    'B2',        // Blue
+    'B4','B8',   // 10 m
+    'B5','B6',   // red-edge
+    'B8A'
   ];
 
   var scaled = image.select(bands).divide(10000);
@@ -79,63 +83,76 @@ function preprocess(image) {
                .copyProperties(image, ['system:time_start']);
 }
 
+
 // ==========================================================
-// 5. Add Vegetation Indices
+// 5. Add Indices
 // ==========================================================
 function addIndices(image) {
 
+  var blue = image.select('B2');
   var red  = image.select('B4');
   var nir  = image.select('B8');
   var nirN = image.select('B8A');
-  var sw1  = image.select('B11');
-  var sw2  = image.select('B12');
   var re1  = image.select('B5');
   var re2  = image.select('B6');
-  var re3  = image.select('B7');
 
-  // NDVI
+  var s = 1.2;
+
+  // --- 10 m indices ---
   var ndvi = nir.subtract(red).divide(nir.add(red)).rename('NDVI');
 
-  // kNDVI
-  var kndvi = ndvi.pow(2).tanh().rename('kNDVI');
+  var nirv = ndvi.multiply(nir).rename('NIRv');
 
-  // CR-SWIR
-  // The denominator calculates the "continuum line" value at 1614nm (B11)
-  // by interpolating between 865nm (B8A) and 2202nm (B12).
-  var denom = nirN.add(
-      sw2.subtract(nirN)
-        .divide(2202 - 865)  // Step 1: Divide by the total distance (x2 - x1)
-        .multiply(1614 - 865) // Step 2: Multiply by the distance to the target (x - x1)
-  );
+  var wdvi = nir.subtract(red.multiply(s)).rename('WDVI');
 
-  var crswir = sw1.divide(denom).rename('CR_SWIR');
+  var msavi = nir.multiply(2).add(1)
+    .subtract(
+      nir.multiply(2).add(1).pow(2)
+        .subtract(nir.subtract(red).multiply(8))
+        .sqrt()
+    )
+    .divide(2)
+    .rename('MSAVI');
 
-  // CIre
-  var cire = re3.divide(re1).subtract(1).rename('CIre');
+  var evi = nir.subtract(red)
+    .multiply(2.5)
+    .divide(
+      nir.add(red.multiply(6))
+         .subtract(blue.multiply(7.5))
+         .add(1)
+    )
+    .rename('EVI');
 
-  // REP (4PLI)
-  var rep = red.add(re3).divide(2)
-    .subtract(re1)
-    .divide(re2.subtract(re1))
-    .multiply(40)
-    .add(700)
-    .rename('REP');
+  // --- 20 m indices ---
+  var ndre = nirN.subtract(re1).divide(nirN.add(re1)).rename('NDRE');
 
-  return image.addBands([ndvi, kndvi, crswir, cire, rep]);
+  var cire = nirN.divide(re1).subtract(1).rename('CIredge');
+
+  var mtci = re2.subtract(re1)
+                .divide(re1.subtract(red))
+                .rename('MTCI');
+
+  return image.addBands([
+    ndvi, nirv, wdvi, msavi, evi,
+    ndre, cire, mtci
+  ]);
 }
 
+
 // ==========================================================
-// 6. Build Multi-Index Collection
+// 6. Build collection
 // ==========================================================
 var vegCollection = s2
   .map(preprocess)
   .map(addIndices)
-  .select(['NDVI','kNDVI','CR_SWIR','CIre','REP']);
+  .select([
+    'NDVI','NIRv','WDVI','MSAVI','EVI',
+    'NDRE','CIredge','MTCI'
+  ]);
 
-print('Vegetation collection:', vegCollection.size());
 
 // ==========================================================
-// 7. Daily Composites
+// 7. Daily composites
 // ==========================================================
 function dailyComposite(collection) {
 
@@ -151,63 +168,61 @@ function dailyComposite(collection) {
     var day = ee.Date(dayStr);
     var nextDay = day.advance(1,'day');
 
-    var daily = collection.filterDate(day, nextDay).mean()
-      .set('system:time_start', day.millis())
-      .set('date', dayStr);
-
-    return daily;
+    return collection.filterDate(day, nextDay).mean()
+      .set('system:time_start', day.millis());
   });
 
   return ee.ImageCollection(dailyImages);
 }
 
 var vegDaily = dailyComposite(vegCollection);
-print('Daily images:', vegDaily.size());
+
 
 // ==========================================================
-// 8. Separate 10 m and 20 m Index Collections
+// 8. Separate collections
 // ==========================================================
+var collection10m = vegDaily.select([
+  'NDVI','NIRv','WDVI','MSAVI','EVI'
+]);
 
-// 10 m indices (native resolution)
-var collection10m = vegDaily.select(['NDVI','kNDVI']);
+var collection20m = vegDaily.select([
+  'NDRE','CIredge','MTCI'
+]);
 
-// 20 m indices (native resolution)
-var collection20m = vegDaily.select(['CR_SWIR','CIre','REP']);
 
-// ----------------------------------------------------------
-// 9. Convert Each Collection to Multi-Band Stack
-// ----------------------------------------------------------
-
-// ---------- 10 m STACK ----------
-var stack10m = collection10m.toBands();
-
-// Rename bands → YYYYMMDD_index
+// ==========================================================
+// 9. Convert to stacks
+// ==========================================================
 var timestamps = vegDaily.aggregate_array('system:time_start');
+
+// --- 10 m ---
+var stack10m = collection10m.toBands();
 
 var bandNames10 = ee.List.sequence(0, timestamps.size().subtract(1))
   .map(function(i){
-    var t = ee.Number(timestamps.get(i));
-    var dateStr = ee.Date(t).format('YYYYMMdd');
+    var dateStr = ee.Date(timestamps.get(i)).format('YYYYMMdd');
     return [
       dateStr.cat('_NDVI'),
-      dateStr.cat('_kNDVI')
+      dateStr.cat('_NIRv'),
+      dateStr.cat('_WDVI'),
+      dateStr.cat('_MSAVI'),
+      dateStr.cat('_EVI')
     ];
   }).flatten();
 
 stack10m = stack10m.rename(bandNames10).toFloat();
 
 
-// ---------- 20 m STACK ----------
+// --- 20 m ---
 var stack20m = collection20m.toBands();
 
 var bandNames20 = ee.List.sequence(0, timestamps.size().subtract(1))
   .map(function(i){
-    var t = ee.Number(timestamps.get(i));
-    var dateStr = ee.Date(t).format('YYYYMMdd');
+    var dateStr = ee.Date(timestamps.get(i)).format('YYYYMMdd');
     return [
-      dateStr.cat('_CRSWIR'),
-      dateStr.cat('_CIre'),
-      dateStr.cat('_REP')
+      dateStr.cat('_NDRE'),
+      dateStr.cat('_CIredge'),
+      dateStr.cat('_MTCI')
     ];
   }).flatten();
 
@@ -215,28 +230,24 @@ stack20m = stack20m.rename(bandNames20).toFloat();
 
 
 // ==========================================================
-// 10. Export 10 m Stack (RD New)
+// 10. Export
 // ==========================================================
 Export.image.toDrive({
   image: stack10m.clip(aoi),
-  description: 'MultiIndex_10m_Stack_RDNew',
+  description: 'VIs_10m_Stack_RDNew',
   folder: 'MGIThesis',
-  fileNamePrefix: 'MultiIndex_10m_Daily_2020_2025',
+  fileNamePrefix: 'VIs_10m_2020_2025_RDNew',
   region: aoi,
   crs: 'EPSG:28992',
   scale: 10,
   maxPixels: 1e13
 });
 
-
-// ==========================================================
-// 11. Export 20 m Stack (RD New)
-// ==========================================================
 Export.image.toDrive({
   image: stack20m.clip(aoi),
-  description: 'MultiIndex_20m_Stack_RDNew',
+  description: 'VIs_20m_Stack_RDNew',
   folder: 'MGIThesis',
-  fileNamePrefix: 'MultiIndex_20m_Daily_2020_2025',
+  fileNamePrefix: 'VIs_20m_2020_2025_RDNew',
   region: aoi,
   crs: 'EPSG:28992',
   scale: 20,
