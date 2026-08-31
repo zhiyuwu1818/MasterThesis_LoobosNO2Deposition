@@ -1,5 +1,5 @@
 # About this repository
-In this repository, I have included the code I used for my MGI thesis titled: Intergrating remote sensing and in-situ NO2 measurements to quantify dry nitrogen oxides deposition to veluwe forest.
+In this repository, I have included the code I used for my MGI thesis titled: Intergrating remote sensing and in-situ NO2 measurements to quantify dry nitrogen oxides deposition to veluwe forest [full thesis](https://edepot.wur.nl/719655).
 
 The analysis pipeline is organized into seven stages. It begins with acquiring and pre-processing in-situ and TROPOMI NO₂ and meteorological data (A), followed by flux footprint modelling to define the spatial domain of representativeness (B) and its integration with remote sensing data (C). Vegetation indices derived from this integration are then analyzed (D, RQ1) alongside in-situ measurements (E, RQ1) to characterize surface conditions. These outputs feed into inferring surface NO₂/NOₓ concentrations (F, RQ2), which are finally used to estimate NO₂ dry deposition (G, RQ3).
 
