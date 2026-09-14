@@ -9,4 +9,4 @@ To download stacks from GEE, the resulted footprint area shapefile need to be im
 
 There could be bugs and discrepancies due to the scale and limitation of time of the project, if you can not fix it, feel free to contact me!
 
-Contact information: Zhiyu Wu, zhiyu.wu@wur.nl, zhiyuwu2023@gmail.com
+Contact information: Zhiyu Wu, zhiyu.wu@wur.nl (not active anymore), zhiyuwu2023@gmail.com
